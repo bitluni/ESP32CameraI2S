@@ -1,35 +1,58 @@
-#include "I2S.h"
+#include "I2SCamera.h"
 #include "Log.h"
 
-int I2S::blocksReceived = 0;
-int I2S::framesReceived = 0;
-int I2S::xres = 640;
-int I2S::yres = 480;
-gpio_num_t I2S::vSyncPin = (gpio_num_t)0;
-intr_handle_t I2S::i2sInterruptHandle = 0;
-intr_handle_t I2S::vSyncInterruptHandle = 0;
-int I2S::dmaBufferCount = 0;
-DMABuffer **I2S::dmaBuffer = 0;
-unsigned char* I2S::frame = 0;
-int I2S::framePointer = 0;
+int I2SCamera::blocksReceived = 0;
+int I2SCamera::framesReceived = 0;
+int I2SCamera::xres = 640;
+int I2SCamera::yres = 480;
+gpio_num_t I2SCamera::vSyncPin = (gpio_num_t)0;
+intr_handle_t I2SCamera::i2sInterruptHandle = 0;
+intr_handle_t I2SCamera::vSyncInterruptHandle = 0;
+int I2SCamera::dmaBufferCount = 0;
+int I2SCamera::dmaBufferActive = 0;
+DMABuffer **I2SCamera::dmaBuffer = 0;
+unsigned char* I2SCamera::frame = 0;
+int I2SCamera::framePointer = 0;
+int I2SCamera::frameBytes = 0;
+volatile bool I2SCamera::stopSignal = false;
 
-void IRAM_ATTR I2S::i2sInterrupt(void* arg)
+void IRAM_ATTR I2SCamera::i2sInterrupt(void* arg)
 {
     I2S0.int_clr.val = I2S0.int_raw.val;
     blocksReceived++;
-    //if (blocksReceived == yres)
+    unsigned char* buf = dmaBuffer[dmaBufferActive]->buffer;
+    dmaBufferActive = (dmaBufferActive + 1) % dmaBufferCount;
+    if(framePointer < frameBytes)
+      for(int i = 0; i < xres * 4; i += 4)
+      {
+        frame[framePointer++] = buf[i + 2];
+        frame[framePointer++] = buf[i];
+      }
+    if (blocksReceived == yres)
+    {
+      framePointer = 0;
+      blocksReceived = 0;
+      framesReceived++;
+      if(stopSignal)
+      {
+        i2sStop();
+        stopSignal = false;
+      }
+    }
     //    i2sStop();
 }
 
-void IRAM_ATTR I2S::vSyncInterrupt(void* arg)
+void IRAM_ATTR I2SCamera::vSyncInterrupt(void* arg)
 {
     GPIO.status1_w1tc.val = GPIO.status1.val;
     GPIO.status_w1tc = GPIO.status;
-    if(gpio_get_level(vSyncPin) == 0)
-      framesReceived++;
+    if(gpio_get_level(vSyncPin))
+    {
+      //frame done
+    }
 }
 
-void I2S::i2sStop()
+void I2SCamera::i2sStop()
 {
     esp_intr_disable(i2sInterruptHandle);
     esp_intr_disable(vSyncInterruptHandle);
@@ -37,16 +60,17 @@ void I2S::i2sStop()
     I2S0.conf.rx_start = 0;
 }
 
-void I2S::i2sRun()
+void I2SCamera::i2sRun()
 {
     DEBUG_PRINTLN("I2S Run");
     while (gpio_get_level(vSyncPin) == 0);
     while (gpio_get_level(vSyncPin) != 0);
 
-    blocksReceived = 0;
     esp_intr_disable(i2sInterruptHandle);
     i2sConfReset();
-
+    blocksReceived = 0;
+    dmaBufferActive = 0;
+    framePointer = 0;
     DEBUG_PRINT("Sample count ");
     DEBUG_PRINTLN(dmaBuffer[0]->sampleCount());
     I2S0.rx_eof_num = dmaBuffer[0]->sampleCount();
@@ -60,11 +84,11 @@ void I2S::i2sRun()
     I2S0.conf.rx_start = 1;
 }
 
-bool I2S::initVSync(int pin)
+bool I2SCamera::initVSync(int pin)
 {
   DEBUG_PRINT("Initializing VSYNC... ");
   vSyncPin = (gpio_num_t)pin;
-  gpio_set_intr_type(vSyncPin, GPIO_INTR_NEGEDGE);
+  gpio_set_intr_type(vSyncPin, GPIO_INTR_POSEDGE);
   gpio_intr_enable(vSyncPin);
   if(gpio_isr_register(&vSyncInterrupt, (void*)"vSyncInterrupt", ESP_INTR_FLAG_INTRDISABLED | ESP_INTR_FLAG_IRAM, &vSyncInterruptHandle) != ESP_OK) 
   {
@@ -75,24 +99,29 @@ bool I2S::initVSync(int pin)
   return true;
 }
 
-void I2S::deinitVSync()
+void I2SCamera::deinitVSync()
 {
   esp_intr_disable(vSyncInterruptHandle);
 }
 
-bool I2S::init(const int XRES, const int YRES, const int VSYNC, const int HREF, const int XCLK, const int PCLK, const int D0, const int D1, const int D2, const int D3, const int D4, const int D5, const int D6, const int D7)
+bool I2SCamera::init(const int XRES, const int YRES, const int VSYNC, const int HREF, const int XCLK, const int PCLK, const int D0, const int D1, const int D2, const int D3, const int D4, const int D5, const int D6, const int D7)
 {
   xres = XRES;
   yres = YRES;
-  ClockEnable(XCLK, 20000000); //base is 80MHz
+  frameBytes = XRES * YRES * 2;
+  frame = (unsigned char*)malloc(frameBytes);
+  if(!frame)
+  {
+    DEBUG_PRINTLN("Not enough memory for frame buffer!");
+    return false;
+  }
   i2sInit(VSYNC, HREF, PCLK, D0, D1, D2, D3, D4, D5, D6, D7);
-  dmaBufferInit(xres * 4);
+  dmaBufferInit(xres * 2 * 2);  //two bytes per dword packing, two bytes per pixel
   initVSync(VSYNC);
-  i2sRun();
   return true;
 }
 
-bool I2S::i2sInit(const int VSYNC, const int HREF, const int PCLK, const int D0, const int D1, const int D2, const int D3, const int D4, const int D5, const int D6, const int D7)
+bool I2SCamera::i2sInit(const int VSYNC, const int HREF, const int PCLK, const int D0, const int D1, const int D2, const int D3, const int D4, const int D5, const int D6, const int D7)
 {    
   int pins[] = {VSYNC, HREF, PCLK, D0, D1, D2, D3, D4, D5, D6, D7};    
   gpio_config_t conf = {
@@ -143,16 +172,13 @@ bool I2S::i2sInit(const int VSYNC, const int HREF, const int PCLK, const int D0,
     // Use HSYNC/VSYNC/HREF to control sampling
     I2S0.conf2.camera_en = 1;
     // Configure clock divider
-    /*I2S0.clkm_conf.clkm_div_a = 1;
+    I2S0.clkm_conf.clkm_div_a = 1;
     I2S0.clkm_conf.clkm_div_b = 0;
-    I2S0.clkm_conf.clkm_div_num = 2;*/
-    I2S0.clkm_conf.clkm_div_a = 0;
-    I2S0.clkm_conf.clkm_div_b = 0;
-    I2S0.clkm_conf.clkm_div_num = 1;
-
+    I2S0.clkm_conf.clkm_div_num = 2;
     // FIFO will sink data to DMA
     I2S0.fifo_conf.dscr_en = 1;
     // FIFO configuration
+    //two bytes per dword packing
     I2S0.fifo_conf.rx_fifo_mod = SM_0A0B_0C0D;  //pack two bytes in one dword see :https://github.com/igrr/esp32-cam-demo/issues/29
     I2S0.fifo_conf.rx_fifo_mod_force_en = 1;
     I2S0.conf_chan.rx_chan_mod = 1;
@@ -170,7 +196,7 @@ bool I2S::i2sInit(const int VSYNC, const int HREF, const int PCLK, const int D0,
     return true;
 }
 
-bool I2S::dmaBufferInit(int bytes)
+bool I2SCamera::dmaBufferInit(int bytes)
 {
   dmaBufferCount = 2;
   dmaBuffer = (DMABuffer**) malloc(sizeof(DMABuffer*) * dmaBufferCount);
@@ -183,7 +209,7 @@ bool I2S::dmaBufferInit(int bytes)
   dmaBuffer[dmaBufferCount - 1]->next(dmaBuffer[0]);
 }
 
-void I2S::dmaBufferDeinit()
+void I2SCamera::dmaBufferDeinit()
 {
     if (!dmaBuffer) return;
     for(int i = 0; i < dmaBufferCount; i++)

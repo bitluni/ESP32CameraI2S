@@ -1,77 +1,158 @@
-//#include Camera.h
-#include "soc/soc.h"
-#include "soc/gpio_sig_map.h"
-#include "soc/i2s_reg.h"
-#include "soc/i2s_struct.h"
-#include "soc/io_mux_reg.h"
+#include "OV7670.h"
 
-#include <driver/dac.h>
+#include <Adafruit_GFX.h>    // Core graphics library
+#include <Adafruit_ST7735.h> // Hardware-specific library
 
-#include "I2S.h"
-
-//esp32 mini kit
-//boot       0 2 5
-//flash      6(clk) 7(sd0) 8(sd1) 9(sd2) 10(sd3) 11(cmd)
-//UART       1(tx) 3(rx)
-//free pins  4 12(tdi) 13(tck) 14(tms) 15(tdo) 16 17 27 32 33
-//spi        18(sck) 19(miso) 23(mosi) 5(ss)
-//i2c        21(sda) 22(scl)
-//dac        25 26
-//input only 34 35 36(svp) 39(svn)  
-
-//pins 0 2 5 are used for boot.. only connect hi-z. can still be used as output without external pullups
-//free pins 4 12 13 14 15 16 17 27 32 33
-//input only 34, 35, 36(VP), 39(VN)
-//dac 25, 26
+#include <WiFi.h>
+#include <WiFiMulti.h>
+#include <WiFiClient.h>
+#include "BMP.h"
 
 const int SIOD = 21; //SDA
 const int SIOC = 22; //SCL
 
-const int VSYNC = 34;//25;
-const int HREF = 35;//23;
+const int VSYNC = 34;
+const int HREF = 35;
 
-const int XCLK = 32;//21;
+const int XCLK = 32;
 const int PCLK = 33;
 
-const int D0 = 4;
-const int D1 = 12;
-const int D2 = 13;
-const int D3 = 14;
-const int D4 = 15;
-const int D5 = 16;
-const int D6 = 17;
-const int D7 = 27;
+const int D0 = 27;
+const int D1 = 17;
+const int D2 = 16;
+const int D3 = 15;
+const int D4 = 14;
+const int D5 = 13;
+const int D6 = 12;
+const int D7 = 4;
 
-const int DC = 2;
+const int TFT_DC = 2;
+const int TFT_CS = 5;
+//DIN <- MOSI 23
+//CLK <- SCK 18
 
-//const int DAC1 = 25;
-//const int DAC2 = 26;
-#include <math.h>
+#define ssid1        "YOUR_WIFI_SSID"
+#define password1    "YOUR_PASSWORD"
+//#define ssid2        ""
+//#define password2    ""
 
-const int XRES = 640;
-const int YRES = 480;
+Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS,  TFT_DC, 0/*no reset*/);
+OV7670 *camera;
+
+WiFiMulti wifiMulti;
+WiFiServer server(80);
+
+unsigned char bmpHeader[BMP::headerSize];
+
+void serve()
+{
+  WiFiClient client = server.available();
+  if (client) 
+  {
+    //Serial.println("New Client.");
+    String currentLine = "";
+    while (client.connected()) 
+    {
+      if (client.available()) 
+      {
+        char c = client.read();
+        //Serial.write(c);
+        if (c == '\n') 
+        {
+          if (currentLine.length() == 0) 
+          {
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-type:text/html");
+            client.println();
+            client.print(
+              "<style>body{margin: 0}\nimg{height: 100%; width: auto}</style>"
+              "<img id='a' src='/camera' onload='this.style.display=\"initial\"; var b = document.getElementById(\"b\"); b.style.display=\"none\"; b.src=\"camera?\"+Date.now(); '>"
+              "<img id='b' style='display: none' src='/camera' onload='this.style.display=\"initial\"; var a = document.getElementById(\"a\"); a.style.display=\"none\"; a.src=\"camera?\"+Date.now(); '>");
+            client.println();
+            break;
+          } 
+          else 
+          {
+            currentLine = "";
+          }
+        } 
+        else if (c != '\r') 
+        {
+          currentLine += c;
+        }
+        
+        if(currentLine.endsWith("GET /camera"))
+        {
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-type:image/bmp");
+            client.println();
+            
+            for(int i = 0; i < BMP::headerSize; i++)
+               client.write(bmpHeader[i]);
+            for(int i = 0; i < camera->xres * camera->yres * 2; i++)
+               client.write(camera->frame[i]);
+        }
+      }
+    }
+    // close the connection:
+    client.stop();
+    //Serial.println("Client Disconnected.");
+  }  
+}
 
 void setup() 
 {
   Serial.begin(115200);
-  I2S::init(XRES, YRES, VSYNC, HREF, XCLK, PCLK, D0, D1, D2, D3, D4, D5, D6, D7);
-  //dac_output_enable(DAC_CHANNEL_1); //25
-  //dac_output_enable(DAC_CHANNEL_2); //26
+
+  wifiMulti.addAP(ssid1, password1);
+  //wifiMulti.addAP(ssid2, password2);
+  Serial.println("Connecting Wifi...");
+  if(wifiMulti.run() == WL_CONNECTED) {
+      Serial.println("");
+      Serial.println("WiFi connected");
+      Serial.println("IP address: ");
+      Serial.println(WiFi.localIP());
+  }
   
+  camera = new OV7670(OV7670::Mode::QQVGA_RGB565, SIOD, SIOC, VSYNC, HREF, XCLK, PCLK, D0, D1, D2, D3, D4, D5, D6, D7);
+  BMP::construct16BitHeader(bmpHeader, camera->xres, camera->yres);
+  
+  tft.initR(INITR_BLACKTAB);
+  tft.fillScreen(0);
+  server.begin();
 }
 
+void displayY8(unsigned char * frame, int xres, int yres)
+{
+  tft.setAddrWindow(0, 0, yres - 1, xres - 1);
+  int i = 0;
+  for(int x = 0; x < xres; x++)
+    for(int y = 0; y < yres; y++)
+    {
+      i = y * xres + x;
+      unsigned char c = frame[i];
+      unsigned short r = c >> 3;
+      unsigned short g = c >> 2;
+      unsigned short b = c >> 3;
+      tft.pushColor(r << 11 | g << 5 | b);
+    }  
+}
+
+void displayRGB565(unsigned char * frame, int xres, int yres)
+{
+  tft.setAddrWindow(0, 0, yres - 1, xres - 1);
+  int i = 0;
+  for(int x = 0; x < xres; x++)
+    for(int y = 0; y < yres; y++)
+    {
+      i = (y * xres + x) << 1;
+      tft.pushColor((frame[i] | (frame[i+1] << 8)));
+    }  
+}
 
 void loop()
 {
-  Serial.print(I2S::blocksReceived);
-  Serial.print(' ');
-  Serial.println(I2S::framesReceived);
-  Serial.print(' ');
-  for(int i = 0; i < 16; i++)
-  { 
-      if(I2S::dmaBuffer[0]->buffer[i] < 16) Serial.print('0');
-      Serial.print(I2S::dmaBuffer[0]->buffer[i], HEX);
-  }
-  Serial.println();
-  delay(1000); 
+  camera->oneFrame();
+  serve();
+  displayRGB565(camera->frame, camera->xres, camera->yres);
 }

@@ -11,7 +11,7 @@
 #include "XClk.h"
 #include "DMABuffer.h"
 
-class I2S
+class I2SCamera
 {
   public:
   static gpio_num_t vSyncPin;
@@ -22,9 +22,12 @@ class I2S
   static intr_handle_t i2sInterruptHandle;
   static intr_handle_t vSyncInterruptHandle;
   static int dmaBufferCount;
+  static int dmaBufferActive;
   static DMABuffer **dmaBuffer;
   static unsigned char* frame;
   static int framePointer;
+  static int frameBytes;
+  static volatile bool stopSignal;
 
   typedef enum {
     /* camera sends byte sequence: s1, s2, s3, s4, ...
@@ -52,6 +55,23 @@ class I2S
     I2S0.conf.val |= conf_reset_flags;
     I2S0.conf.val &= ~conf_reset_flags;
     while (I2S0.state.rx_fifo_reset_back);
+  }
+  
+  void start()
+  {
+    i2sRun();
+  }
+
+  void stop()
+  {
+    stopSignal = true;
+    while(stopSignal);
+  }
+
+  void oneFrame()
+  {
+    start();
+    stop();
   }
   
   static void i2sStop();

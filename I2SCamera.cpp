@@ -1,3 +1,8 @@
+//parts of his code are taken from
+//https://github.com/igrr/esp32-cam-demo
+//by Ivan Grokhotkov
+//released under Apache License 2.0
+
 #include "I2SCamera.h"
 #include "Log.h"
 

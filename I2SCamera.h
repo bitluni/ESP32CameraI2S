@@ -82,7 +82,7 @@ class I2SCamera
   static void i2sStop();
   static void i2sRun();
 
-  static bool dmaBufferInit(int bytes);
+  static void dmaBufferInit(int bytes);
   static void dmaBufferDeinit();
 
   static bool initVSync(int pin);

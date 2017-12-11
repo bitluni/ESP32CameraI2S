@@ -201,7 +201,7 @@ bool I2SCamera::i2sInit(const int VSYNC, const int HREF, const int PCLK, const i
     return true;
 }
 
-bool I2SCamera::dmaBufferInit(int bytes)
+void I2SCamera::dmaBufferInit(int bytes)
 {
   dmaBufferCount = 2;
   dmaBuffer = (DMABuffer**) malloc(sizeof(DMABuffer*) * dmaBufferCount);

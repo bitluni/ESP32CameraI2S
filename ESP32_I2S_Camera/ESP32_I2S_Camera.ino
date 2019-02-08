@@ -87,10 +87,8 @@ void serve()
             client.println("Content-type:image/bmp");
             client.println();
             
-            for(int i = 0; i < BMP::headerSize; i++)
-               client.write(bmpHeader[i]);
-            for(int i = 0; i < camera->xres * camera->yres * 2; i++)
-               client.write(camera->frame[i]);
+            client.write(bmpHeader, BMP::headerSize);
+            client.write(camera->frame, camera->xres * camera->yres * 2);
         }
       }
     }

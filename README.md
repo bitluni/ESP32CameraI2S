@@ -15,6 +15,7 @@ https://github.com/igrr/esp32-cam-demo
 #License
 Since parts of the code are taken from the esp-cam-demo which are subject to the Apache License 2.0 license. You will find a note in at the top of the respective files.
 The rest of the code is Public Domain
+
 #The code is based on the ESP32 integration in the Arduino IDE. You need:
 Arduino IDE
 ESP32 integration

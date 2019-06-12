@@ -17,8 +17,12 @@ Since parts of the code are taken from the esp-cam-demo which are subject to the
 The rest of the code is Public Domain
 
 #The code is based on the ESP32 integration in the Arduino IDE. You need:
+
 Arduino IDE
+
 ESP32 integration
+
 Adafruit GFX library
+
 Adafruit ST7735 library
 

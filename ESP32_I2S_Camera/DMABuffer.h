@@ -1,3 +1,4 @@
+#include <multi_heap.h> //added by me
 #pragma once
 
 class DMABuffer

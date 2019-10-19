@@ -73,7 +73,7 @@ void OV7670::frameControl(int hStart, int hStop, int vStart, int vStop)
 void OV7670::QQQVGA()
 {
     i2c.writeRegister(ADDR, REG_COM3, 0x04);  //DCW enable
-    i2c.writeRegister(ADDR, REG_COM14, 0x1b); //pixel clock divided by 4, manual scaling enable, DCW and PCLK controlled by register
+    i2c.writeRegister(ADDR, REG_COM14, 0x1b); //pixel clock divided by 8, manual scaling enable, DCW and PCLK controlled by register
     i2c.writeRegister(ADDR, REG_SCALING_XSC, 0x3a);
     i2c.writeRegister(ADDR, REG_SCALING_YSC, 0x35);
     i2c.writeRegister(ADDR, REG_SCALING_DCWCTR, 0x33); //downsample by 8
